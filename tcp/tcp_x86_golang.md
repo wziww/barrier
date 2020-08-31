@@ -36,8 +36,8 @@ internetSocket 主要参数说明：
  * laddr local address  本地地址
  * raddr remote address 远程地址，这边的例子是创建本地 tcp 服务器，所以远程地址不需要填
  * sotype socket type   socket 类型，tcp 使用 syscall.SOCK_STREAM
-          syscall.SOCK_STREAM     TCP
-					syscall.SOCK_DGRAM      UDP
+ *        syscall.SOCK_STREAM     TCP
+ *        syscall.SOCK_DGRAM      UDP
  */
 
 func internetSocket(ctx context.Context, net string, laddr, raddr sockaddr, sotype, proto int, mode string, ctrlFn func(string, string, syscall.RawConn) error) (fd *netFD, err error) {
