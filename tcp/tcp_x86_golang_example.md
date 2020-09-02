@@ -20,6 +20,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+  /*
+   * syscall.SetNonblock(fd, true) 等同于： 
+   * flag, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_GETFL), 0)
+	 * flag |= syscall.O_NONBLOCK
+	 * _, _, errno = syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_SETFL), flag)
+	 */
 	err = syscall.SetNonblock(fd, true)
 	if err != nil {
 		panic(err)

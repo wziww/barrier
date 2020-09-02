@@ -189,6 +189,8 @@ func sysSocket(family, sotype, proto int) (int, error) {
 }
 ```
 
+- SetNonblock
+
 ```go
 /* file: go/src/syscall/exec_unix.go
  * syscall.SetNonblock(fd, true)
@@ -214,7 +216,7 @@ func SetNonblock(fd int, nonblocking bool) (err error) {
 }
 ```
 
-
+- fcntl
 
 ```go
 /*  file: go/src/syscall/zsyscall_linux_amd64.go
