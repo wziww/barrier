@@ -69,7 +69,7 @@ func favoriteAddrFamily(network string, laddr, raddr sockaddr, mode string) (fam
 	case '6':
 		return syscall.AF_INET6, true
 	}
-	// local addr 参数以及系统 ip 支持程度校验
+  // local addr 参数以及系统 ip 支持程度校验 (ipv4 & ipv6)
 	if mode == "listen" && (laddr == nil || laddr.isWildcard()) {
 		if supportsIPv4map() || !supportsIPv4() {
 			return syscall.AF_INET6, false
@@ -152,10 +152,15 @@ func sysSocket(family, sotype, proto int) (int, error) {
          这边是在进行系统调用 open 时设置了 fd 的 O_CLOEXEC 属性，这是个原子性的操作
          也可以在打开文件后 fcntl F_SETFD 设置 fd 属性，但是会有并发风险
          此时打开文件和设置属性分为了两个步骤，可能会造成在间隙期间依旧出现不良后果的情况
-         该属性具体解释：
-         O_CLOEXEC 是为了在多线程场景下避免 fd 泄露给子线程造成一些诸如子线程非法使用父线程打开的文件，子线程非法持有父线程 				 socket，当父线程退出的时候子线程依旧持有 socket fd 从而导致例如端口依旧被占用之类的问题 
+         
+         SOCK_NONBLOCK:
+         决定在 socket 读取时是进行阻塞亦或者非阻塞操作，阻塞：socket 操作直到有信息才返回，非阻塞：socket 操作如果无信息则     			   返回
+         SOCK_CLOEXEC / O_CLOEXEC：
+         O_CLOEXEC 是为了在多线程场景下避免非意愿地将 fd 泄露给子线程，造成一些诸如子线程非法使用父线程打开的文件，子线程非法持有父线程 socket，当父线程退出的时候子线程依旧持有 socket fd 从而导致例如端口依旧被占用之类的问题 
          
    */
+  // file: go/src/net/hook_unix.go
+  // var	  socketFunc   func(int, int, int) (int, error)  = syscall.Socket   
 	s, err := socketFunc(family, sotype|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, proto)
 	switch err {
 	case nil:
@@ -164,6 +169,7 @@ func sysSocket(family, sotype, proto int) (int, error) {
 		return -1, os.NewSyscallError("socket", err)
 	case syscall.EPROTONOSUPPORT, syscall.EINVAL:
 	}
+  // ForkLock 结合 SOCK_CLOEXEC 一起理解，ForkLock 锁此处就是为了避免 fd 创建及 fd 属性设置(此处先谈论 SOCK_CLOEXEC)这一非原子性过程造成的中途操作 fd 而导致的不良后果
 	syscall.ForkLock.RLock()
 	s, err = socketFunc(family, sotype, proto)
 	if err == nil {
