@@ -153,6 +153,7 @@ func sysSocket(family, sotype, proto int) (int, error) {
          也可以在打开文件后 fcntl F_SETFD 设置 fd 属性，但是会有并发风险
          此时打开文件和设置属性分为了两个步骤，可能会造成在间隙期间依旧出现不良后果的情况
          该属性具体解释：
+         O_CLOEXEC 是为了在多线程场景下避免 fd 泄露给子线程造成一些诸如子线程非法使用父线程打开的文件，子线程非法持有父线程 				 socket，当父线程退出的时候子线程依旧持有 socket fd 从而导致例如端口依旧被占用之类的问题 
          
    */
 	s, err := socketFunc(family, sotype|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, proto)
@@ -172,6 +173,7 @@ func sysSocket(family, sotype, proto int) (int, error) {
 	if err != nil {
 		return -1, os.NewSyscallError("socket", err)
 	}
+  // 非阻塞设置
 	if err = syscall.SetNonblock(s, true); err != nil {
 		poll.CloseFunc(s)
 		return -1, os.NewSyscallError("setnonblock", err)
