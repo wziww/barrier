@@ -15,7 +15,7 @@ func main() {
    * syscall.SOCK_STREAM    TCP
    */
 	syscall.ForkLock.RLock()
-  //
+  // 设置 IPv4 的 TCP socket
   fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
   if err != nil {
     panic(err)

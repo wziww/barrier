@@ -17,8 +17,8 @@
 此处使用 golang 标准库 net 创建了一个 tcp 服务并进行监听，首先来主要分析下
 net.Listen 干了些什么
 
-```golang
-// go/src/net/tcpsock_posix.go
+```go
+// file: go/src/net/tcpsock_posix.go
 func (sl *sysListener) listenTCP(ctx context.Context, laddr *TCPAddr) (*TCPListener, error) {
   fd, err := internetSocket(ctx, sl.network, laddr, nil, syscall.SOCK_STREAM, 0, "listen", sl.ListenConfig.Control)
   if err != nil {
@@ -245,5 +245,96 @@ func fcntl(fd int, cmd int, arg int) (val int, err error) {
 }
 ```
 
+### newFD(s, family, sotype, net)
 
+```go
+/* file: go/src/net/fd_unix.go
+ * 根据系统 fd 生成 golang fd
+ */
+func newFD(sysfd, family, sotype int, net string) (*netFD, error) {
+  ret := &netFD{
+    // poll fd, poll 相关会在 poll 章节内结合内核源码进行分析
+    pfd: poll.FD{
+    Sysfd:         sysfd,
+    IsStream:      sotype == syscall.SOCK_STREAM,
+    ZeroReadIsEOF: sotype != syscall.SOCK_DGRAM && sotype != syscall.SOCK_RAW,
+    },
+    family: family,
+    sotype: sotype,
+    net:    net,
+  }
+  return ret, nil
+}
+```
 
+### fd.listenStream(laddr, listenerBacklog(), ctrlFn)
+
+```go
+/* file: go/src/net/sock_posix.go
+ * laddr   本地地址
+ * backlog 新连接队列的长度限制，连接队列、全连接队列
+ *         https://man7.org/linux/man-pages/man2/listen.2.html
+ *         socket 对应队列大小收到两个因素影响，一个是 listen 函数的 backlog 大小，
+           一个则是内核 somaxconn 参数大小，golang 这边选择了以内核参数大小为标准，
+           如果读取失败则用 syscall.SOMAXCONN 进行设置，整体逻辑可见下方第二段函数
+           kernel somaxconn：/proc/sys/net/core/somaxconn
+ * 
+ */
+func (fd *netFD) listenStream(laddr sockaddr, backlog int, ctrlFn func(string, string, syscall.RawConn) error) error {
+  var err error
+  if err = setDefaultListenerSockopts(fd.pfd.Sysfd); err != nil {
+    return err
+  }
+  var lsa syscall.Sockaddr
+  if lsa, err = laddr.sockaddr(fd.family); err != nil {
+    return err
+  }
+  if ctrlFn != nil {
+    c, err := newRawConn(fd)
+    if err != nil {
+      return err
+    }
+    if err := ctrlFn(fd.ctrlNetwork(), laddr.String(), c); err != nil {
+      return err
+    }
+  }
+  if err = syscall.Bind(fd.pfd.Sysfd, lsa); err != nil {
+    return os.NewSyscallError("bind", err)
+  }
+  if err = listenFunc(fd.pfd.Sysfd, backlog); err != nil {
+    return os.NewSyscallError("listen", err)
+  }
+  if err = fd.init(); err != nil {
+    return err
+  }
+  lsa, _ = syscall.Getsockname(fd.pfd.Sysfd)
+  fd.setAddr(fd.addrFunc()(lsa), nil)
+  return nil
+}
+/* file: go/src/net/sock_linux.go
+ * maxListenerBacklog()
+ */
+func maxListenerBacklog() int {
+  fd, err := open("/proc/sys/net/core/somaxconn")
+  if err != nil {
+    return syscall.SOMAXCONN
+  }
+  defer fd.close()
+  l, ok := fd.readLine()
+  if !ok {
+    return syscall.SOMAXCONN
+  }
+  f := getFields(l)
+  n, _, ok := dtoi(f[0])
+  if n == 0 || !ok {
+    return syscall.SOMAXCONN
+  }
+  // Linux stores the backlog in a uint16.
+  // Truncate number to avoid wrapping.
+  // See issue 5030.
+  if n > 1<<16-1 {
+    n = 1<<16 - 1
+  }
+  return n
+}
+```
