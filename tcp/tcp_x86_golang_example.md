@@ -21,10 +21,15 @@ func main() {
 		panic(err)
 	}
   /*
-   * syscall.SetNonblock(fd, true) 等同于： 
-   * flag, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_GETFL), 0)
+   * // syscall.SetNonblock(fd, true) 等同于： 
+   * // 先获取 fd 属性
+	 * flag, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_GETFL), 0)
+	 * // 在此属性上设置 O_NONBLOCK 标识
 	 * flag |= syscall.O_NONBLOCK
 	 * _, _, errno = syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_SETFL), flag)
+	 *
+	 * // syscall.CloseOnExec(fd) 等同于：
+	 * syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_SETFL), syscall.FD_CLOEXEC)
 	 */
 	err = syscall.SetNonblock(fd, true)
 	if err != nil {
