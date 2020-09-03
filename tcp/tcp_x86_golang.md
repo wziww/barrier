@@ -273,11 +273,19 @@ func newFD(sysfd, family, sotype int, net string) (*netFD, error) {
 /* file: go/src/net/sock_posix.go
  * laddr   本地地址
  * backlog 新连接队列的长度限制，连接队列、全连接队列
- *         https://man7.org/linux/man-pages/man2/listen.2.html
- *         socket 对应队列大小收到两个因素影响，一个是 listen 函数的 backlog 大小，
+           
+           https://man7.org/linux/man-pages/man2/listen.2.html
+           
+           socket 对应队列大小收到两个因素影响，一个是 listen 函数的 backlog 大小，
            一个则是内核 somaxconn 参数大小，golang 这边选择了以内核参数大小为标准，
+
            如果读取失败则用 syscall.SOMAXCONN 进行设置，整体逻辑可见下方第二段函数
+
            kernel somaxconn：/proc/sys/net/core/somaxconn
+           
+           拓展：/proc/sys/net/ipv4/tcp_max_syn_backlog 半队列大小
+           
+           如果 tcp 队列跑满了，那么接下去的请求都会 ECONNREFUSED
  * 
  */
 func (fd *netFD) listenStream(laddr sockaddr, backlog int, ctrlFn func(string, string, syscall.RawConn) error) error {
