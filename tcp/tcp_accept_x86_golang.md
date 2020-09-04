@@ -103,9 +103,26 @@ func (fd *FD) SetsockoptInt(level, name, arg int) error {
    */
   return syscall.SetsockoptInt(fd.Sysfd, level, name, arg)
 }
+/* file: go/src/tcpsockopt_unix.go
+ */
+func setKeepAlivePeriod(fd *netFD, d time.Duration) error {
+  // The kernel expects seconds so round to next highest second.
+  secs := int(roundDurationUp(d, time.Second))
+  /* https://man7.org/linux/man-pages/man7/tcp.7.html 
+   * TCP_KEEPINTVL: SOCKET FD 属性
+                    tcp_keepalive_intvl (integer; default: 75; since Linux 2.4)
+                    The number of seconds between TCP keep-alive probes.
+   */
+  if err := fd.pfd.SetsockoptInt(syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, secs); err != nil {
+    return wrapSyscallError("setsockopt", err)
+  }
+  err := fd.pfd.SetsockoptInt(syscall.IPPROTO_TCP, syscall.TCP_KEEPIDLE, secs)
+  runtime.KeepAlive(fd)
+  return wrapSyscallError("setsockopt", err)
+}
 ```
 
-#### KeepAlive 相关内核参数说明
+#### KeepAlive 相关内核参数说明总结
 
 > cat  /proc/sys/net/ipv4/tcp_keepalive_*
 
