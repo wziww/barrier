@@ -109,8 +109,8 @@ func (fd *FD) SetsockoptInt(level, name, arg int) error {
 
 > cat  /proc/sys/net/ipv4/tcp_keepalive_*
 
-- `tcp_keepalive_time`: KeepAlive的空闲时长，或者说每次正常发送心跳的周期，默认值为7200s（2小时）
+- `tcp_keepalive_time`: KeepAlive 的空闲时长，或者说每次正常发送心跳的周期，默认值为7200s（2小时）
 
-- `tcp_keepalive_intvl`: KeepAlive探测包的发送间隔，默认值为75s
+- `tcp_keepalive_intvl`: KeepAlive 探测包的发送间隔，默认值为75s
 
-- `tcp_keepalive_probes`: 在tcp_keepalive_time之后，没有接收到对方确认，继续发送保活探测包次数，默认值为9（次）
+- `tcp_keepalive_probes`: 在 tcp_keepalive_time 之后，没有接收到对方确认，继续发送保活探测包次数，默认值为9（次）
