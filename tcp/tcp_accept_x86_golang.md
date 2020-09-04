@@ -96,6 +96,11 @@ func (fd *FD) SetsockoptInt(level, name, arg int) error {
     return err
   }
   defer fd.decref()
+  /* Syscall6(SYS_SETSOCKOPT, uintptr(s), uintptr(level), uintptr(name), uintptr(val), uintptr(vallen), 0)
+   * SYS_SETSOCKOPT:  socket 选项设置
+                      ausyscall --dump | grep SETSOCKOPT -i
+   * level: 这边需要设置为 syscall.SOL_SOCKET -- 套接字级别设置
+   */
   return syscall.SetsockoptInt(fd.Sysfd, level, name, arg)
 }
 ```
