@@ -109,13 +109,23 @@ func setKeepAlivePeriod(fd *netFD, d time.Duration) error {
   // The kernel expects seconds so round to next highest second.
   secs := int(roundDurationUp(d, time.Second))
   /* https://man7.org/linux/man-pages/man7/tcp.7.html 
-   * TCP_KEEPINTVL: SOCKET FD 属性
-                    tcp_keepalive_intvl (integer; default: 75; since Linux 2.4)
-                    The number of seconds between TCP keep-alive probes.
+   * TCP_KEEPINTVL: 覆盖内核 tcp keepalive 参数
+                    TCP_KEEPINTVL (since Linux 2.4)
+                    The time (in seconds) between individual keepalive probes.
+                    This option should not be used in code intended to be
+                    portable.
    */
   if err := fd.pfd.SetsockoptInt(syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, secs); err != nil {
     return wrapSyscallError("setsockopt", err)
   }
+  /* https://man7.org/linux/man-pages/man7/tcp.7.html
+   * TCP_KEEPIDLE: 覆盖内核 tcp keepalive 参数
+                   TCP_KEEPIDLE (since Linux 2.4)
+                   The time (in seconds) the connection needs to remain idle
+                   before TCP starts sending keepalive probes, if the socket
+                   option SO_KEEPALIVE has been set on this socket.  This option
+                   should not be used in code intended to be portable.
+   */
   err := fd.pfd.SetsockoptInt(syscall.IPPROTO_TCP, syscall.TCP_KEEPIDLE, secs)
   runtime.KeepAlive(fd)
   return wrapSyscallError("setsockopt", err)
@@ -126,8 +136,14 @@ func setKeepAlivePeriod(fd *netFD, d time.Duration) error {
 
 > cat  /proc/sys/net/ipv4/tcp_keepalive_*
 
-- `tcp_keepalive_time`: KeepAlive 的空闲时长，或者说每次正常发送心跳的周期，默认值为7200s（2小时）
+- tcp_keepalive_time: KeepAlive 的空闲时长，或者说每次正常发送心跳的周期，默认值为7200s（2小时）
 
-- `tcp_keepalive_intvl`: KeepAlive 探测包的发送间隔，默认值为75s
+- tcp_keepalive_intvl: KeepAlive 探测包的发送间隔，默认值为75s
 
-- `tcp_keepalive_probes`: 在 tcp_keepalive_time 之后，没有接收到对方确认，继续发送保活探测包次数，默认值为9（次）
+- tcp_keepalive_probes: 在 tcp_keepalive_time 之后，没有接收到对方确认，继续发送保活探测包次数，默认值为9（次）
+
+#### 应用层覆盖参数：
+
+- TCP_KEEPCNT 覆盖  tcp_keepalive_probes，默认9（次）
+- TCP_KEEPIDLE 覆盖 tcp_keepalive_time，默认7200（秒）
+- TCP_KEEPINTVL 覆盖 tcp_keepalive_intvl，默认75（秒）
