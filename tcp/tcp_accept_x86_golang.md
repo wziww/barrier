@@ -41,6 +41,11 @@ func (ln *TCPListener) accept() (*TCPConn, error) {
   if err != nil {
     return nil, err
   }
+  // newTCPConn 方法主要是涉及 fd 封装以及 TCP_NODELAY 设置
+  /* TCP_NODELAY 打开该属性的时候，TCP/IP协议栈上将 Nagle 算法关闭
+                 kernel:
+                 #define DSO_NODELAY	12    // Turn off nagle
+   */
   tc := newTCPConn(fd)
   /*
     // ListenConfig contains options for listening to an address.
@@ -147,3 +152,4 @@ func setKeepAlivePeriod(fd *netFD, d time.Duration) error {
 - TCP_KEEPCNT 覆盖  tcp_keepalive_probes，默认9（次）
 - TCP_KEEPIDLE 覆盖 tcp_keepalive_time，默认7200（秒）
 - TCP_KEEPINTVL 覆盖 tcp_keepalive_intvl，默认75（秒）
+
