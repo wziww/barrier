@@ -153,3 +153,119 @@ func setKeepAlivePeriod(fd *netFD, d time.Duration) error {
 - TCP_KEEPIDLE 覆盖 tcp_keepalive_time，默认7200（秒）
 - TCP_KEEPINTVL 覆盖 tcp_keepalive_intvl，默认75（秒）
 
+----
+
+> 上述部分分析的是 accept 后对成功建立的 socket 属性的设置（keepalive，nodely），接下去详细分析下 accept 过程
+
+```go
+/* file: go/src/net/fd_unix.go
+ */
+func (fd *netFD) accept() (netfd *netFD, err error) {
+  // golang poll accept
+  d, rsa, errcall, err := fd.pfd.Accept()
+  if err != nil {
+    if errcall != "" {
+      err = wrapSyscallError(errcall, err)
+    }
+    return nil, err
+  }
+  // golang fd 生成
+  if netfd, err = newFD(d, fd.family, fd.sotype, fd.net); err != nil {
+    poll.CloseFunc(d)
+    return nil, err
+  }
+  if err = netfd.init(); err != nil {
+    netfd.Close()
+    return nil, err
+  }
+  /* https://man7.org/linux/man-pages/man2/getsockname.2.html
+   * int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+   			 getsockname() returns the current address to which the socket sockfd
+         is bound, in the buffer pointed to by addr.  The addrlen argument
+         should be initialized to indicate the amount of space (in bytes)
+         pointed to by addr.  On return it contains the actual size of the
+         socket address.
+
+         The returned address is truncated if the buffer provided is too
+         small; in this case, addrlen will return a value greater than was
+         supplied to the call.
+   */
+  lsa, _ := syscall.Getsockname(netfd.pfd.Sysfd)
+  netfd.setAddr(netfd.addrFunc()(lsa), netfd.addrFunc()(rsa))
+  return netfd, nil
+}
+```
+
+```go
+// Accept wraps the accept network call.
+func (fd *FD) Accept() (int, syscall.Sockaddr, string, error) {
+  // fd 读锁，增加 fd 读操作的引用，当 fd 不能被用作读操作的时候会上锁失败
+  if err := fd.readLock(); err != nil {
+    return -1, nil, "", err
+  }
+  defer fd.readUnlock()
+  // 检查 fd 是否准备好
+  if err := fd.pd.prepareRead(fd.isFile); err != nil {
+    return -1, nil, "", err
+  }
+  for {
+    s, rsa, errcall, err := accept(fd.Sysfd)
+    if err == nil {
+      return s, rsa, "", err
+    }
+    switch err {
+      /* EAGAIN: Resource temporarily unavailable
+       * 暂不可用的情况下
+       */
+    case syscall.EAGAIN:
+      // 如果支持 poll
+      if fd.pd.pollable() {
+        // waitRead 追踪下去会进行 runtime_pollWait 调用
+        if err = fd.pd.waitRead(fd.isFile); err == nil {
+          continue
+        }
+      }
+    case syscall.ECONNABORTED:
+      // This means that a socket on the listen
+      // queue was closed before we Accept()ed it;
+      // it's a silly error, so try again.
+      continue
+    }
+    return -1, nil, errcall, err
+  }
+}
+```
+
+```go
+/* file: go/src/internal/pool/fd_poll_runtime.go
+ */
+func runtime_pollWait(ctx uintptr, mode int) int
+/* file: go/src/runtime/netpoll.go
+ * 这边使用了 //go:linkname 「function name」 「package/func 」
+ 	 第一个参数表示当前方法或变量
+ 	 第二个参数表示目标方法或变量，因为这关指令会破坏系统和包的模块化，因此在使用时必须导入 unsafe // import "unsafe"
+ */
+//go:linkname poll_runtime_pollWait internal/poll.runtime_pollWait
+func poll_runtime_pollWait(pd *pollDesc, mode int) int {
+  // Network poller descriptor 异常确认
+  err := netpollcheckerr(pd, int32(mode))
+  if err != 0 {
+    return err
+  }
+  // As for now only Solaris, illumos, and AIX use level-triggered IO.
+  if GOOS == "solaris" || GOOS == "illumos" || GOOS == "aix" {
+    netpollarm(pd, mode)
+  }
+  for !netpollblock(pd, int32(mode), false) {
+    err = netpollcheckerr(pd, int32(mode))
+    if err != 0 {
+      return err
+    }
+    // Can happen if timeout has fired and unblocked us,
+    // but before we had a chance to run, timeout has been reset.
+    // Pretend it has not happened and retry.
+  }
+  return 0
+}
+```
+
