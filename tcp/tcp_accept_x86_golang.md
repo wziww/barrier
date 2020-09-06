@@ -489,6 +489,7 @@ out_fd:
 struct sock *inet_csk_accept(struct sock *sk, int flags, int *err)
 {
   struct inet_connection_sock *icsk = inet_csk(sk);
+  // accept queue
   struct request_sock_queue *queue = &icsk->icsk_accept_queue;
   struct request_sock *req;
   struct sock *newsk;
@@ -504,7 +505,8 @@ struct sock *inet_csk_accept(struct sock *sk, int flags, int *err)
     goto out_err;
 
   /* Find already established connection */
-  if (reqsk_queue_empty(queue)) {
+  if (reqsk_queue_empty(queue)) { // 如果 accept queue 为空
+    // sock 非阻塞判断
     long timeo = sock_rcvtimeo(sk, flags & O_NONBLOCK);
 
     /* If this is a non blocking socket don't sleep */
@@ -516,6 +518,7 @@ struct sock *inet_csk_accept(struct sock *sk, int flags, int *err)
     if (error)
       goto out_err;
   }
+  // 从队列里取出一个 accept tcp sock
   req = reqsk_queue_remove(queue, sk);
   newsk = req->sk;
 
