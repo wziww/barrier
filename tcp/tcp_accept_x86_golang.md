@@ -383,3 +383,167 @@ func accept(s int) (int, syscall.Sockaddr, string, error) {
 }
 ```
 
+```c
+/* kernel accept4
+ */
+/*
+ *	For accept, we attempt to create a new socket, set up the link
+ *	with the client, wake up the client, then return the new
+ *	connected fd. We collect the address of the connector in kernel
+ *	space and move it to user at the very end. This is unclean because
+ *	we open the socket then return an error.
+ *
+ *	1003.1g adds the ability to recvmsg() to query connection pending
+ *	status to recvmsg. We need to add that support in a way thats
+ *	clean when we restucture accept also.
+ */
+// accept 和 accept4 本质上没有过大差别，accept4 提供四个传参，允许用户在创建 accept 创建 socket 的时候设置 flags
+SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
+    int __user *, upeer_addrlen, int, flags)
+{
+  struct socket *sock, *newsock;
+  struct file *newfile;
+  int err, len, newfd, fput_needed;
+  struct sockaddr_storage address;
+
+  if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
+    return -EINVAL;
+
+  if (SOCK_NONBLOCK != O_NONBLOCK && (flags & SOCK_NONBLOCK))
+    flags = (flags & ~SOCK_NONBLOCK) | O_NONBLOCK;
+	// 由 fd 找到 file 结构体，再由 file 结构体获取 socket 结构体，通过 fd 在进程 fds 表中查询
+  // 在 fd 查找的时候，如果当前仅有一个进程在使用的时候则不上锁，否则会加锁后再进行查找。避免不必要的锁开销
+  sock = sockfd_lookup_light(fd, &err, &fput_needed);
+  if (!sock)
+    goto out;
+
+  err = -ENFILE;
+  newsock = sock_alloc();
+  if (!newsock)
+    goto out_put;
+
+  newsock->type = sock->type;
+  newsock->ops = sock->ops;
+
+  /*
+   * We don't need try_module_get here, as the listening socket (sock)
+   * has the protocol module (sock->ops->owner) held.
+    */
+  __module_get(newsock->ops->owner);
+
+  newfd = get_unused_fd_flags(flags);
+  if (unlikely(newfd < 0)) {
+    err = newfd;
+    sock_release(newsock);
+    goto out_put;
+  }
+  newfile = sock_alloc_file(newsock, flags, sock->sk->sk_prot_creator->name);
+  if (IS_ERR(newfile)) {
+		err = PTR_ERR(newfile);
+		put_unused_fd(newfd);
+		sock_release(newsock);
+		goto out_put;
+	}
+
+  err = security_socket_accept(sock, newsock);
+  if (err)
+    goto out_fd;
+  // 对应协议栈的 accept  tcp / udp，这边先分析 tcp 下的 accept
+  // 该方法调用可追踪到 kernel/net/ipv4/inet_connection_sock.c
+  err = sock->ops->accept(sock, newsock, sock->file->f_flags);
+  if (err < 0)
+		goto out_fd;
+	// 将 sock 对应地址拷贝给用户
+	if (upeer_sockaddr) {
+    if (newsock->ops->getname(newsock, (struct sockaddr *)&address,
+            &len, 2) < 0) {
+      err = -ECONNABORTED;
+      goto out_fd;
+    }
+    err = move_addr_to_user(&address,
+        len, upeer_sockaddr, upeer_addrlen);
+    if (err < 0)
+      goto out_fd;
+  }
+
+	/* File flags are not inherited via accept() unlike another OSes. */
+
+  fd_install(newfd, newfile);
+  err = newfd;
+
+out_put:
+  fput_light(sock->file, fput_needed);
+out:
+  return err;
+out_fd:
+  fput(newfile);
+  put_unused_fd(newfd);
+  goto out_put;
+}
+```
+
+```c
+/*
+ * This will accept the next outstanding connection.
+ */
+struct sock *inet_csk_accept(struct sock *sk, int flags, int *err)
+{
+  struct inet_connection_sock *icsk = inet_csk(sk);
+  struct request_sock_queue *queue = &icsk->icsk_accept_queue;
+  struct request_sock *req;
+  struct sock *newsk;
+  int error;
+
+  lock_sock(sk);
+
+  /* We need to make sure that this socket is listening,
+   * and that it has something pending.
+   */
+  error = -EINVAL;
+  if (sk->sk_state != TCP_LISTEN)
+    goto out_err;
+
+  /* Find already established connection */
+  if (reqsk_queue_empty(queue)) {
+    long timeo = sock_rcvtimeo(sk, flags & O_NONBLOCK);
+
+    /* If this is a non blocking socket don't sleep */
+    error = -EAGAIN;
+    if (!timeo)
+      goto out_err;
+
+    error = inet_csk_wait_for_connect(sk, timeo);
+    if (error)
+      goto out_err;
+  }
+  req = reqsk_queue_remove(queue, sk);
+  newsk = req->sk;
+
+  if (sk->sk_protocol == IPPROTO_TCP &&
+       tcp_rsk(req)->tfo_listener) {
+    spin_lock_bh(&queue->fastopenq.lock);
+    if (tcp_rsk(req)->tfo_listener) {
+      /* We are still waiting for the final ACK from 3WHS
+       * so can't free req now. Instead, we set req->sk to
+       * NULL to signify that the child socket is taken
+       * so reqsk_fastopen_remove() will free the req
+       * when 3WHS finishes (or is aborted).
+       */
+      req->sk = NULL;
+      req = NULL;
+    }
+    spin_unlock_bh(&queue->fastopenq.lock);
+  }
+out:
+  release_sock(sk);
+  if (req)
+    reqsk_put(req);
+  return newsk;
+out_err:
+  newsk = NULL;
+  req = NULL;
+  *err = error;
+  goto out;
+}
+```
+
