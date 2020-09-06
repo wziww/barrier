@@ -383,6 +383,10 @@ func accept(s int) (int, syscall.Sockaddr, string, error) {
 }
 ```
 
+---
+
+### kernel accept 部分拆解
+
 ```c
 /* kernel accept4
  */
