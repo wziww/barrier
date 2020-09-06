@@ -256,6 +256,7 @@ func poll_runtime_pollWait(pd *pollDesc, mode int) int {
   if GOOS == "solaris" || GOOS == "illumos" || GOOS == "aix" {
     netpollarm(pd, mode)
   }
+  // go poll 阻塞，直到有连接建立后再进行协程调度
   for !netpollblock(pd, int32(mode), false) {
     err = netpollcheckerr(pd, int32(mode))
     if err != 0 {
@@ -266,6 +267,119 @@ func poll_runtime_pollWait(pd *pollDesc, mode int) int {
     // Pretend it has not happened and retry.
   }
   return 0
+}
+```
+
+```go
+/* file go/src/runtime/netpoll.go
+ * 这边粗略看一下 netpollblock 具体干了哪些工作，详细分析会结合协程调度在 goroutine 章节具体分析
+ */
+// returns true if IO is ready, or false if timedout or closed
+// waitio - wait only for completed IO, ignore errors
+func netpollblock(pd *pollDesc, mode int32, waitio bool) bool {
+  gpp := &pd.rg
+  if mode == 'w' {
+    gpp = &pd.wg
+  }
+  
+  // set the gpp semaphore to WAIT
+  for {
+    old := *gpp
+    if old == pdReady {
+      *gpp = 0
+      return true
+    }
+    if old != 0 {
+      throw("runtime: double wait")
+    }
+    // cas 比较赋值操作
+    if atomic.Casuintptr(gpp, 0, pdWait) {
+      break
+    }
+  }
+  
+  
+  // need to recheck error states after setting gpp to WAIT
+  // this is necessary because runtime_pollUnblock/runtime_pollSetDeadline/deadlineimpl
+  // do the opposite: store to closing/rd/wd, membarrier, load of rg/wg
+  if waitio || netpollcheckerr(pd, mode) == 0 {
+    // gopark 函数：协程标记等待状态，挂起等待 runtime 调度
+    gopark(netpollblockcommit, unsafe.Pointer(gpp), waitReasonIOWait, traceEvGoBlockNet, 5)
+  }
+  // be careful to not lose concurrent READY notification
+  old := atomic.Xchguintptr(gpp, 0)
+  if old > pdWait {
+    throw("runtime: corrupted polldesc")
+  }
+  return old == pdReady
+}
+```
+
+```go
+/* file: go/src/internal/pool/sock_cloexec.go
+ *  s, rsa, errcall, err := accept(fd.Sysfd)
+ *  fd.Sysfd 服务端监听 socket 套接字，具体生成过程可在 tcp_server_x86_golang.md 中查看
+ */
+func accept(s int) (int, syscall.Sockaddr, string, error) {
+  ns, sa, err := Accept4Func(s, syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC)
+  // On Linux the accept4 system call was introduced in 2.6.28
+  // kernel and on FreeBSD it was introduced in 10 kernel. If we
+  // get an ENOSYS error on both Linux and FreeBSD, or EINVAL
+  // error on Linux, fall back to using accept.
+  switch err {
+  case nil:
+    return ns, sa, "", nil
+  default: // errors other than the ones listed
+    return -1, sa, "accept4", err
+  case syscall.ENOSYS: // syscall missing
+  case syscall.EINVAL: // some Linux use this instead of ENOSYS
+  case syscall.EACCES: // some Linux use this instead of ENOSYS
+  case syscall.EFAULT: // some Linux use this instead of ENOSYS
+  }
+
+	// See ../syscall/exec_unix.go for description of ForkLock.
+	// It is probably okay to hold the lock across syscall.Accept
+	// because we have put fd.sysfd into non-blocking mode.
+	// However, a call to the File method will put it back into
+	// blocking mode. We can't take that risk, so no use of ForkLock here.
+  
+  /* var Accept4Func func(int, int) (int, syscall.Sockaddr, error) = syscall.Accept4
+   * accept 在 kernel 中的过程：
+         tcp connect => NET => server => syn queue => accept queue
+         调用 accept 从 accept queue 中取出成功建立的 tcp
+         socket 在 accpet 过程中会进行相应地址（端口）的分配，端口分配范围为内核参数 ip_local_port_range 决定 
+         cat /proc/sys/net/ipv4/ip_local_port_range
+         对应 kernel 操作：
+     /* Update system visible IP port range */
+     static void set_local_port_range(struct net *net, int range[2])
+     {
+         bool same_parity = !((range[0] ^ range[1]) & 1);
+
+         write_seqlock_bh(&net->ipv4.ip_local_ports.lock);
+         if (same_parity && !net->ipv4.ip_local_ports.warned) {
+            net->ipv4.ip_local_ports.warned = true;
+            pr_err_ratelimited("ip_local_port_range: prefer different parity for start/end values.\n");
+         }
+         net->ipv4.ip_local_ports.range[0] = range[0];
+         net->ipv4.ip_local_ports.range[1] = range[1];
+         write_sequnlock_bh(&net->ipv4.ip_local_ports.lock);
+    }
+   */
+  
+	ns, sa, err = AcceptFunc(s)
+	if err == nil {
+    // CloseOnExec 设置，具体可在 tcp_server_x86_golang 中查看
+		syscall.CloseOnExec(ns)
+	}
+	if err != nil {
+		return -1, nil, "accept", err
+	}
+  // IO 非阻塞设置
+	if err = syscall.SetNonblock(ns, true); err != nil {
+		CloseFunc(ns)
+		return -1, nil, "setnonblock", err
+	}
+	return ns, sa, "", nil
 }
 ```
 
