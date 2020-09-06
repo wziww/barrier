@@ -366,20 +366,20 @@ func accept(s int) (int, syscall.Sockaddr, string, error) {
     }
    */
   
-	ns, sa, err = AcceptFunc(s)
-	if err == nil {
+  ns, sa, err = AcceptFunc(s)
+  if err == nil {
     // CloseOnExec 设置，具体可在 tcp_server_x86_golang 中查看
-		syscall.CloseOnExec(ns)
-	}
-	if err != nil {
-		return -1, nil, "accept", err
-	}
+    syscall.CloseOnExec(ns)
+  }
+  if err != nil {
+    return -1, nil, "accept", err
+  }
   // IO 非阻塞设置
-	if err = syscall.SetNonblock(ns, true); err != nil {
-		CloseFunc(ns)
-		return -1, nil, "setnonblock", err
-	}
-	return ns, sa, "", nil
+  if err = syscall.SetNonblock(ns, true); err != nil {
+    CloseFunc(ns)
+    return -1, nil, "setnonblock", err
+  }
+  return ns, sa, "", nil
 }
 ```
 
