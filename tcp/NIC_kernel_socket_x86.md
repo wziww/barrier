@@ -5,6 +5,8 @@
 - driver: r8169 
 - version: 2.3LK-NAPI
 
+#### 驱动 pci 模块声明部分
+
 ```c
 /* file: kerner/drivers/net/ethernet/eraltek/r8169.c
  */
@@ -42,5 +44,32 @@ supports-test: no
 supports-eeprom-access: no
 supports-register-dump: yes
 supports-priv-flags: no
+```
+
+```c
+/* file kernel/drivers/net/ethernet/realtek/r8169.c
+ * 接上文 probe 中 rtl_init_one 函数
+ * 在该函数中需要关心的主要是一个 struct net_device *dev;    // net_device 结构，它抽象了对应的网络设备
+ * dev.netdev_ops 里面放置的函数即为一个网络设备的操作方法集
+ * dev->netdev_ops = &rtl_netdev_ops;
+ */
+static const struct net_device_ops rtl_netdev_ops = {
+  .ndo_open		= rtl_open,
+  .ndo_stop		= rtl8169_close,
+  .ndo_get_stats64	= rtl8169_get_stats64,
+  .ndo_start_xmit		= rtl8169_start_xmit,
+  .ndo_tx_timeout		= rtl8169_tx_timeout,
+  .ndo_validate_addr	= eth_validate_addr,
+  .ndo_change_mtu		= rtl8169_change_mtu,
+  .ndo_fix_features	= rtl8169_fix_features,
+  .ndo_set_features	= rtl8169_set_features,
+  .ndo_set_mac_address	= rtl_set_mac_address,
+  .ndo_do_ioctl		= rtl8169_ioctl,
+  .ndo_set_rx_mode	= rtl_set_rx_mode,
+#ifdef CONFIG_NET_POLL_CONTROLLER
+  .ndo_poll_controller	= rtl8169_netpoll,
+#endif
+
+};
 ```
 
