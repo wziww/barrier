@@ -22,7 +22,9 @@
 ....
 ```
 
+![{\ displaystyle {\ begin {aligned} \ sum _ {h = 0} ^ {\ lfloor \ log n \ rfloor} {\ frac {n} {2 ^ {h}}} O（h）＆= O \ left （n \ sum _ {h = 0} ^ {\ lfloor \ log n \ rfloor} {\ frac {h} {2 ^ {h}}} \ right）\\＆= O \ left（n \ sum _ { h = 0} ^ {\ infty} {\ frac {h} {2 ^ {h}}} \ right）\\＆= O（n）\ end {aligned}}}](https://wikimedia.org/api/rest_v1/media/math/render/svg/2b1f5dac83f79e16b8794611e4b4a91594c422d8)
 
+> 堆构造时间复杂度公式
 
 ```go
 // file go/src/container/heap/heap.go
@@ -68,6 +70,8 @@ type Interface interface {
 // Init is idempotent with respect to the heap invariants
 // and may be called whenever the heap invariants may have been invalidated.
 // The complexity is O(n) where n = h.Len().
+/* 对堆的单次操作是 nlogn ，但是这边采用的是下沉操作，因为数组的形式一开始可认为是个乱序的堆，所以这边从堆底往上操作，每次的操作对象是个高度为 i 的子堆，将子堆构造成一个符合条件的 大/小 堆后，有序向从局部到整体所以无需操作所有的节点
+ */
 func Init(h Interface) {
   // heapify
   n := h.Len()
@@ -79,7 +83,9 @@ func Init(h Interface) {
 // Push pushes the element x onto the heap.
 // The complexity is O(log n) where n = h.Len().
 func Push(h Interface, x interface{}) {
+  // 数值加入堆尾
   h.Push(x)
+  // 堆尾尝试上浮
   up(h, h.Len()-1)
 }
 
@@ -88,7 +94,9 @@ func Push(h Interface, x interface{}) {
 // Pop is equivalent to Remove(h, 0).
 func Pop(h Interface) interface{} {
   n := h.Len() - 1
-  h.Swap(0, n)
+  // 将堆顶数值和堆数组最后值做交换，而后操作这时候的堆顶（堆尾换上去的）进行下沉操作重构当前堆，最后弹出堆尾（最开始的堆顶，始终为之前堆结构的最值
+  h.Swap(0, n) 
+  // 下沉操作
   down(h, 0, n)
   return h.Pop()
 }
@@ -98,8 +106,10 @@ func Pop(h Interface) interface{} {
 func Remove(h Interface, i int) interface{} {
   n := h.Len() - 1
   if n != i {
+    // 逻辑和 Pop api 类似，和堆尾交换
     h.Swap(i, n)
     if !down(h, i, n) {
+      // 下沉失败则尝试上浮
       up(h, i)
     }
   }
@@ -115,10 +125,12 @@ func Fix(h Interface, i int) {
     up(h, i)
   }
 }
-
+/* 堆元素上浮操作
+ * 依次和父节点进行比较，如果比父节点 大/小（看堆性质）则与父节点进行交换
+ */
 func up(h Interface, j int) {
   for {
-    i := (j - 1) / 2 // parent
+    i := (j - 1) / 2 // parent    根据笔记开头的下标对应反向计算获得父节点和当前 j 坐标的关系
     if i == j || !h.Less(j, i) {
       break
     }
@@ -126,7 +138,9 @@ func up(h Interface, j int) {
     j = i
   }
 }
-
+/* 下沉操作
+ * 依次和左右子节点比较，如果比子节点 大/小 （看堆性质）则进行交换
+ */
 func down(h Interface, i0, n int) bool {
   i := i0
   for {
@@ -134,16 +148,19 @@ func down(h Interface, i0, n int) bool {
     if j1 >= n || j1 < 0 { // j1 < 0 after int overflow
       break
     }
-    j := j1 // left child
+    j := j1 // left child 先与左子节点进行比较
     if j2 := j1 + 1; j2 < n && h.Less(j2, j1) {
-      j = j2 // = 2*i + 2  // right child
+      j = j2 // = 2*i + 2  // right child 再与右子节点比较
     }
     if !h.Less(j, i) {
       break
     }
+    // 如果子节点符合条件进行父子交换操作
     h.Swap(i, j)
+    // 交换后的点即为新坐标，继续进行
     i = j
   }
+  // 比较下沉后的坐标是否为原始坐标，以此判定是否下沉成功
   return i > i0
 }
 
