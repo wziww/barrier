@@ -54,10 +54,15 @@ supports-priv-flags: no
  * dev->netdev_ops = &rtl_netdev_ops;
  */
 static const struct net_device_ops rtl_netdev_ops = {
-  .ndo_open		= rtl_open,
-  .ndo_stop		= rtl8169_close,
-  .ndo_get_stats64	= rtl8169_get_stats64,
-  .ndo_start_xmit		= rtl8169_start_xmit,
+  .ndo_open		= rtl_open,      // 网络设备激活，状态变更为 up 时进行调用  ifconfig eth0 up
+  .ndo_stop		= rtl8169_close, // 网络设备 down 的时候进行调用    			 ifconfig eth0 down
+  .ndo_get_stats64	= rtl8169_get_stats64, // 系统通过该函数进行网卡驱动 stats 数据获取，否则通过 dev->stats 获取
+  .ndo_start_xmit		= rtl8169_start_xmit,  
+  /*  网络协议栈发送数据时，调用驱动中该函数向硬件发送数据
+   *  ndo_start_xmit向硬件提交数据后立即返回
+   *  硬件在完成发送后，以中断的方式通知OS\
+   *  中断服务程序通过内核api——netif_wake_queue (ndev)通知协议栈可再度调用ndo_start_xmit
+   */
   .ndo_tx_timeout		= rtl8169_tx_timeout,
   .ndo_validate_addr	= eth_validate_addr,
   .ndo_change_mtu		= rtl8169_change_mtu,
